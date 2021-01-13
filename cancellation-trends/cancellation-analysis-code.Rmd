@@ -1,0 +1,464 @@
+---
+title: "US Airlines Cancellation Trends"
+author: "Rohan Dalmia"
+date: "4/25/2019"
+output:
+  html_document: default
+  pdf_document: default
+  
+bibliography: bibliography.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction 
+
+---
+
+
+When booking flights, there is always an axiety about any sort of delays or cancellations associated with the trip we book. However, if there's a way one could know what the general trend is for any sort of cancellations or delays for a specific airlines or a flight leg, it will be easier to choose the right airline and plan the trip accordingly. Our group will analyze the _flights_ data for the years *1999* and *2003*, and find trends which would ease the process of booking flights for a user. Since, we are looking at only these two year, our analysis might not be useful for making a booking in the current year; however, the analysis process our team will go through can be replicated for the recent years. Apart from helping a user, we also provide insights of various interesting trends that could be observed in the _flights_ data for the years *1999* and *2003*.  
+<br>
+
+#### Describe the data briefly 
+
+---
+
+
+
+```{r, echo = FALSE}
+#data_1999 = read.csv("1999.csv")
+
+#data_2003 = read.csv("2003.csv")
+
+#Saving files in RDS format to compress them and for faster evaluation 
+# saveRDS(data_1999, "rds_1999.rds" ) 
+# 
+# saveRDS(data_2003, "rds_2003.rds" )
+# 
+# com_1999 = readRDS("rds_1999.rds")
+# 
+# com_2003 = readRDS("rds_2003.rds")
+# 
+# data_join = rbind(com_1999,com_2003)
+# 
+# saveRDS(data_join, "rds_append.rds")
+
+all_data = readRDS("data/rds_append.rds")
+
+airports = read.csv("data/airports.csv")
+
+carriers = read.csv("data/carriers.csv")
+
+plane_data = read.csv("data/plane-data.csv")
+```
+
+## Exploratory Data Analysis 
+
+---
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+library(ggplot2)
+library(dplyr)
+library(ggmap)
+library(leaflet)
+library(maps)
+library(geosphere)
+library(streamgraph)
+library(stringr)
+```
+
+
+#### Overall Cancellation in 1999 and 2003
+
+---
+
+
+We start the analysis by comparing the total cancellations for both years.
+
+```{r, echo = FALSE}
+# create a new dataset with year and cancel proportion
+cancel_prop = all_data %>% 
+  group_by(Year) %>% 
+  summarise(Sum = sum(Cancelled), Obs = n()) %>% 
+  mutate(Proportion = Sum/Obs) %>% 
+  select(Year, Proportion)
+
+# bar plot to visualize cancel proportion
+cancel_visual = ggplot(cancel_prop) +
+  aes(x = factor(Year), y = Proportion , fill = factor(Year)) +
+  geom_bar(stat = "identity") + 
+  coord_cartesian(ylim = c(0, 0.01, 0.02, 0.03)) +
+  labs(title = "Cancellations in 1999 and 2003",
+       subtitle = "Bar represents the proportion of cancellation",
+       x = "Year",
+       fill = "Year")
+
+cancel_visual
+```
+
+Through this bar plot, we can observe that 1999 had almost double the amount of cancellations as 2003. Instead of using absolute value of cancellation, we use proportion because the number of observations for both the years are different. 
+
+
+#### Cancellation Trend Over Month
+
+---
+
+
+
+Now, we look at the cancellation trend over months. For this, we subset our original data to get the observations with only cancelled flights information.
+
+```{r, echo = FALSE}
+# filtering the whole data to get only the cancelled flights data
+cancelled_data = all_data %>% 
+  filter(Cancelled == 1)
+
+# remove all coolumns with NA 
+cancel_data = cancelled_data[, colSums(is.na(cancelled_data)) != nrow(cancelled_data)]
+
+saveRDS(cancel_data, "rds_cancel.rds")
+cancel_data = readRDS("rds_cancel.rds")
+
+
+# creating data to make line plot
+count_cancel = cancel_data %>% 
+  group_by(Year) %>% 
+  summarise(obs = n()) 
+
+count_cancel$Year = as.factor(count_cancel$Year)
+
+lineplot_month = cancel_data %>% 
+  mutate(Year = as.factor(Year), Month = as.factor(Month)) %>% 
+  group_by(Year, Month) %>% 
+  summarise(Cancel = sum(as.numeric(Cancelled))) %>% 
+  arrange(Year, Month) %>% 
+  left_join(count_cancel, by = "Year") %>% 
+  mutate(Prop = Cancel/obs, month = factor(month.abb[Month], levels = month.abb))
+
+ggplot(lineplot_month) + 
+  aes(x = month, y = Prop, col = Year, group = Year) + 
+  geom_point() + 
+  geom_line() +
+  labs(title = "Comparison of Cancellations by Months")
+```
+
+Through this plot, we can see that 1999 had more cancellations than 2003 in 6 months and similarly, 2003 had more cancellations in the other 6 months. Thus, we don't take away much from this plot. However, we do see that cancellations were extremely high in the month of January and February for 1999 and 2003 respectively.  
+
+We now do an analysis by quarter to see if we can get a better trend.
+
+#### Cancellation Trends Over Quarters
+
+---
+
+
+```{r, echo = FALSE}
+#Adding a new variable Quarter to the cancel data
+month = cancel_data$Month
+quarter1_idx = which(month>= 1 & month <= 3)
+quarter2_idx = which(month >= 4 & month <= 6)
+quarter3_idx = which(month >= 7 & month <= 9)
+quarter4_idx = which(month >= 10 & month <= 12)
+
+quarter = c()
+quarter[quarter1_idx] = "Q1"
+quarter[quarter2_idx] = "Q2"
+quarter[quarter3_idx] = "Q3"
+quarter[quarter4_idx] = "Q4"
+
+cancel_data$Quarter = quarter
+
+#Quarter line plot
+lineplot_quarter = cancel_data %>% 
+  mutate(Year = as.factor(Year), Quarter = as.factor(Quarter)) %>% 
+  group_by(Year, Quarter) %>% 
+  summarise(Cancel = sum(as.numeric(Cancelled))) %>% 
+  arrange(Year, Quarter) %>% 
+  left_join(count_cancel, by = "Year") %>% 
+  mutate(Prop = Cancel/obs)
+
+ggplot(lineplot_quarter) + 
+  aes(x = Quarter, y = Prop, col = Year, group = Year) + 
+  geom_point() + 
+  geom_line() +
+  labs(title = "Comparison of Cancellations by Quarter")
+
+```
+
+Through this plot, we can see that 1999 had more cancellations during qaurter 2 and quarter 3, while 2003 had more in  quarter 1 and quarter 4. According to the weather data by government [@weather:2019], we can confirm that 2003 was colder than 1999 and hence, more cancellations.  
+
+Unfortunately, _CancellationCode, CarrierDelay, WeatherDelay, NASDelay, SecurityDelay, LateAircraftDelay_ were not available for the years 1999 and 2003. Thus, we will now go deeper to find out what are the factors and reasons behind the cancellations for these two years with the available. We join the cancellation data with the carriers, airport and plane data as needed. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+# joining the data with carriers dataset
+pc_carrier = inner_join(cancel_data, carriers, by = c("UniqueCarrier" = "Code"))
+```
+
+#### Streamgraph for Cancellation by Airlines
+
+---
+
+We make a streamgraph to see which airlines had the most cancellation in which Month.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#streamgraph
+count_airlines = all_data %>% 
+  filter(Year == 1999) %>% 
+  group_by(UniqueCarrier) %>% 
+  summarise(Count = n()) %>% 
+  left_join(carriers, by =  c("UniqueCarrier" = "Code"))
+
+data_carrier = pc_carrier %>% 
+  filter(Year == 1999) %>% 
+  mutate(Date = as.Date(paste(Year, Month, "01", sep='-'))) %>% 
+  group_by(Date, Description) %>% 
+  summarise(cancel = n()) %>% 
+  left_join(count_airlines, by = "Description") %>% 
+  mutate(Prop = round(cancel/Count,5)) %>% 
+  select(Date, Description, Prop)
+
+
+streamgraph(data_carrier, "Description", "Prop", "Date", interactive = FALSE)%>%
+  sg_axis_x(tick_units = "Date") %>% 
+  sg_title("Cancellation by Airlines in 1999")
+```
+
+Through the streamplot we can see a similar pattern as we saw in the line plot for months, i.e. maximum cancellations in January and then lowest in December. It is interesting to compare the results between the line plot by month and the streamgraph. According to the line plot, the February had fairly low cancellations. Thus, one might expect airlines to have their cancellations decreased from January; however, in this case, we see that the total decrease is fairly high as compared to other months because of American Airlines, which had more than 6000 delays in that month bloating the number of cancellations. Therefore, despite the low cancellations in Feb, one might have wanted to not book a trip with American Airlines. For the month of January, where the cancellation is the max, one might have planned to either travel with Southwest Airlines or America West Airlines. 
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+count_airlines_2003 = all_data %>% 
+  filter(Year == 2003) %>% 
+  group_by(UniqueCarrier) %>% 
+  summarise(Count = n()) %>% 
+  left_join(carriers, by =  c("UniqueCarrier" = "Code"))
+
+data_carrier_2 = pc_carrier %>% 
+  filter(Year == 2003) %>% 
+  mutate(Date = as.Date(paste(Year, Month, "01", sep='-'))) %>% 
+  group_by(Date, Description) %>% 
+  summarise(cancel = n()) %>% 
+  left_join(count_airlines_2003, by = "Description") %>% 
+  mutate(Prop = round(cancel/Count,5)) %>% 
+  select(Date, Description, Prop)
+
+streamgraph(data_carrier_2, "Description", "Prop", "Date", interactive = FALSE)%>%
+  sg_axis_x(tick_units = "Date") %>% 
+  sg_title("Cancellation by Airlines in 2003")
+
+```
+
+Overall, the cancellation trend seems to be wavy, showing the maximum cancellation in the month of Feb, as shown by the line plot. Cancellations seem to be the lowest during the second quarter and during the month of October.  
+
+Out of all the airlines, **Delta Airlines** seems to be relatively consistent throughout with their cancellations, especially from March to Dec. This shows that they could probably be the best option for someone planning to travel that year.
+
+All the airlines had an increase in cancellation in the month of Feb, but Skywest airlines was the only one which reduced their cancellation rate. A user would have been preferred to travel with them during that time.
+
+
+#### Analysis of January 1999
+
+---
+
+Now, we dive deeper in the month of January of 1999 to see what day had the most cancellations and what could be the potential reason behind that.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+airport_cancel = left_join(cancel_data, airports, by = c("Origin" = "iata"))
+airport_cancel$DayofMonth = as.numeric(airport_cancel$DayofMonth)
+jan_day_count = airport_cancel %>% 
+  filter(Month == 1, Year == 1999) %>% 
+  group_by(DayofMonth) %>% 
+  summarise(Cancel = n()) %>% 
+  arrange(DayofMonth)
+
+
+ggplot(jan_day_count) +
+  aes(x = DayofMonth, y = Cancel, group = 1) +
+  geom_line() +
+  scale_x_continuous(labels = 1:31, breaks = 1:31) +
+  labs(title = "January 1999 Cancellations")
+```
+
+From the above plot, we can see that 2nd day of January had the most number of cancellations. We will drill further and see which states had the maximum cancellations on this particular day.
+
+```{r, echo = FALSE}
+state_cancel = airport_cancel %>% 
+  filter(Year == 1999, Month == 1, DayofMonth == 2) %>% 
+  group_by(state) %>% 
+  summarise(Cancel = n()) %>% 
+  arrange(Cancel)
+
+state_cancel$state = factor(state_cancel$state,
+                          levels = state_cancel$state[order(state_cancel$Cancel, decreasing = TRUE)])
+
+ggplot(state_cancel) +
+  aes(x = state, y = Cancel, fill = Cancel, group = Cancel) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "none") +
+  scale_fill_continuous(low="blue", high="dark blue") +
+  labs(title = "Cancellations by State",
+       subtitle = "Date: January 2nd 1999")
+
+```
+
+Illinois had the most amount of cancellations on 2nd January, 1999. On doing research about this day, I found a [wikipedia webpage](https://en.wikipedia.org/wiki/North_American_blizzard_of_1999) that showed that there was a huge blizzard which hit the midwestern states. **Chicago/O'hare had 55 cm of snow** and high cancellations on that day does make sense. 
+
+#### Analysis of February 2003
+
+---
+
+Similarly, we analyse the reason behind high cancellation for February 2003 (seen in the line plot). 
+
+```{r, echo = FALSE}
+feb_day_count = airport_cancel %>% 
+  filter(Month == 2, Year == 2003) %>% 
+  group_by(DayofMonth) %>% 
+  summarise(Cancel = n()) %>% 
+  arrange(DayofMonth)
+
+
+ggplot(feb_day_count) +
+  aes(x = DayofMonth, y = Cancel, group = 1) +
+  geom_line() +
+  scale_x_continuous(labels = 1:31, breaks = 1:31) +
+  labs(title = "February Cancellations")
+
+```
+
+The 17th day of February had the most cancellations in 2003 and it is way more than others. We go deeper to see which state had the highest cancellation on this day. 
+
+```{r, echo = FALSE}
+state_cancel_2003 = airport_cancel %>% 
+  filter(Year == 2003, Month == 2, DayofMonth == 17) %>% 
+  group_by(state) %>% 
+  summarise(Cancel = n()) %>% 
+  arrange(Cancel)
+
+state_cancel_2003$state = factor(state_cancel_2003$state,
+                                 levels = state_cancel_2003$state[order(state_cancel_2003$Cancel,
+                                                                        decreasing = TRUE)])
+
+cc = scales::seq_gradient_pal("blue", "red", "Lab")(seq(0,1,length.out=100))
+ggplot(state_cancel_2003) +
+  aes(x = state, y = Cancel, group = Cancel, fill = Cancel) +
+  geom_col() +
+  scale_fill_continuous(low="blue", high="red") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none") +
+  labs(title = "Cancellations by State",
+       subtitle = "Date: 17th February, 2003")
+
+```
+
+New York, Virgina, New Jersey and Pennsylvania had the highest cancellation. These are all Eastern staes, which suggests something happend in that region in 2003. On doing research, I saw that there was a huge blizzard on this day on the East Coast, also called [Presidents' Day Storm II](https://en.wikipedia.org/wiki/North_American_blizzard_of_2003), which caused a record breaking snow storm on the East Coast. Thus, cancellations were inevitable. 
+
+#### Cancellations by State
+
+---
+
+Now, we build a treemap to compare the cancellations by states in 1999 and 2003. Instead of considering the absolute values, the proportion by year has been used as a way to count the cancellations. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#treemap - By State Cancellations
+join_all_airport = left_join(all_data, airports, by = c("Origin" = "iata"))
+
+data_tree = join_all_airport %>% 
+  group_by(Year, state) %>% 
+  summarise(total_cancel = sum(Cancelled))
+
+tot_obs = join_all_airport %>% 
+  group_by(Year) %>% 
+  summarise(counts = n()) %>% 
+  right_join(data_tree, by = "Year") 
+
+state_summary = mutate(tot_obs, prop_cancel = total_cancel/counts)
+
+#interesting - shows that Texas, IL, Cali had the highest cancellations and the highest diversions
+#this could attribute to 
+treemap::treemap(state_summary,
+                index=c("Year","state"),
+                vSize="prop_cancel",
+                vColor = "prop_cancel",
+                type="value", 
+                palette = "Reds",
+                title = "Cancellation Proportion by State")
+```
+
+We saw the reason behind cancellations in Illinois, but why does California have a high cancellation rate in both 1999 and 2003? It will be interesting to go deeper to see what events might have led to this. 
+
+```{r, echo = FALSE}
+ca_data = join_all_airport %>% 
+  filter(state == "CA", Cancelled == 1)
+
+cali_count = ca_data %>% 
+  group_by(Year) %>% 
+  summarise(tot_count = n())
+
+cali_cancel_month = ca_data %>% 
+  group_by(Year, Month) %>% 
+  summarise(Count = n()) %>% 
+  left_join(cali_count, by = "Year") %>% 
+  mutate(prop = Count/tot_count)
+
+ggplot(cali_cancel_month) +
+  aes(x = as.factor(Month), y = prop, col = factor(Year), group = factor(Year)) +
+  geom_line() + geom_point() +
+  labs(title = "Cancellations in California by Month", x = "Month", y = "Cancel Proportion", col = "Year")
+```
+
+October of 2003 definitely catches attention. Let's see if there were any events that led to this high cancellation. 
+
+```{r, echo = FALSE}
+oct_dom_cali = ca_data %>% 
+  filter(Month == 10, Year == 2003) %>% 
+  group_by(DayofMonth) %>% 
+  summarise(Cancel = n())
+oct_dom_cali$DayofMonth = as.factor(oct_dom_cali$DayofMonth)
+oct_dom_cali$DayofMonth = factor(oct_dom_cali$DayofMonth,
+                                 levels = oct_dom_cali$DayofMonth[order(oct_dom_cali$Cancel,
+                                                                        decreasing = TRUE)])
+ggplot(oct_dom_cali) +
+  aes(x = DayofMonth, y = Cancel, group = Cancel, fill = Cancel) +
+  geom_col() +
+  scale_fill_continuous(low="light green", high="dark green") +
+  theme(legend.position = "none") +
+  labs(title = "Cancellations in California",
+       subtitle = "10th October 2003")
+```
+
+The Cedar Fire broke out in California on 26th October 2003, which destroyed more than 270k acres of land. According to the [wikipedia article](https://en.wikipedia.org/wiki/Cedar_Fire_(2003), air travel in and around the region was disrupted due to the effect on air traffic control radar.   
+
+Let's look at the most affected airlines now. 
+
+```{r, echo = FALSE}
+oct_uc_cali = ca_data %>% 
+  filter(Month == 10) %>% 
+  group_by(UniqueCarrier) %>% 
+  summarise(Cancel = n())
+
+oct_uc_cali$UniqueCarrier = factor(oct_uc_cali$UniqueCarrier,
+                                 levels = oct_uc_cali$UniqueCarrier[order(oct_uc_cali$Cancel,
+                                                                        decreasing = TRUE)])
+
+ggplot(oct_uc_cali) +
+  aes(x = UniqueCarrier, y = Cancel, fill = UniqueCarrier) +
+  geom_col() +
+  theme(legend.position = "none") +
+  labs(title = "Cancellations by Carriers",
+       subtitle = "For California in October")
+```
+
+United, American and Southwest Airlines went through the most cancellations and thus, loosened rules for rebooking as mentioned by LA Times [@LA:2003Nov3].
+
+## Shiny
+
+![ ](shiny.jpg)
+
+To provide more convenience to the user, we need to go to the bottom most level of looking at the arrival/departure delays and cancellations, i.e. observing the path of flights. Since, this would be impossible to achieve by normal visualizations, we created a shiny application that shows the cancellations and delays for every path taken by a carrier in a chosen year.  
+
+On the bottom left, the drop down helps user select their desired Carrier and Origin for a given year. After selecting the options, they can view an interactive map to see where all the flights fly from the origin chosen. On hovering over the markers, they can also see the destination airport. The table at the bottom helps the user see the percentage of cancellations, arrival and departure delay for a given origin and it's destination.    
+
+
+## References
+
+---
